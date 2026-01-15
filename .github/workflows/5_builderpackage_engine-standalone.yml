@@ -37,8 +37,9 @@ on:
   pull_request:
     types: [synchronize, opened, reopened, ready_for_review]
     paths:
-      - 'src/engine/**'
       - '.github/workflows/5_builderpackage_engine-standalone.yml'
+      - 'src/engine/**'
+      - 'src/engine/internal_packages/**'
 
 # Ensures only one instance of this workflow is running per PR
 concurrency:
