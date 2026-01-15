@@ -60,6 +60,28 @@ int RemotedConfig(const char *cfgfile, remoted *cfg)
     /* Initialize module limits with default values */
     module_limits_init(&manager_module_limits);
 
+    /* Read module limits from internal_options.conf */
+    /* FIM limits */
+    manager_module_limits.fim.file = getDefine_Int("fim", "file_limit", 1, 2000000);
+    manager_module_limits.fim.registry = getDefine_Int("fim", "registry_limit", 1, 2000000);
+
+    /* Syscollector limits */
+    manager_module_limits.syscollector.hotfixes = getDefine_Int("syscollector", "hotfixes_limit", 1, 1000000);
+    manager_module_limits.syscollector.packages = getDefine_Int("syscollector", "packages_limit", 1, 1000000);
+    manager_module_limits.syscollector.processes = getDefine_Int("syscollector", "processes_limit", 1, 1000000);
+    manager_module_limits.syscollector.ports = getDefine_Int("syscollector", "ports_limit", 1, 1000000);
+    manager_module_limits.syscollector.network_iface = getDefine_Int("syscollector", "network_iface_limit", 1, 100000);
+    manager_module_limits.syscollector.network_protocol = getDefine_Int("syscollector", "network_protocol_limit", 1, 100000);
+    manager_module_limits.syscollector.network_address = getDefine_Int("syscollector", "network_address_limit", 1, 100000);
+    manager_module_limits.syscollector.hardware = getDefine_Int("syscollector", "hardware_limit", 1, 1000);
+    manager_module_limits.syscollector.os_info = getDefine_Int("syscollector", "os_info_limit", 1, 1000);
+    manager_module_limits.syscollector.users = getDefine_Int("syscollector", "users_limit", 1, 100000);
+    manager_module_limits.syscollector.groups = getDefine_Int("syscollector", "groups_limit", 1, 100000);
+    manager_module_limits.syscollector.services = getDefine_Int("syscollector", "services_limit", 1, 1000000);
+
+    /* SCA limits */
+    manager_module_limits.sca.checks = getDefine_Int("sca", "checks_limit", 1, 1000000);
+
     modules |= CREMOTE;
 
     cfg->port = NULL;

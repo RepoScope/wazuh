@@ -454,6 +454,26 @@ STATIC bool agent_handshake_to_server(int server_id, bool is_startup) {
                                                       agent_cluster_name, sizeof(agent_cluster_name)) == 0) {
                                 minfo("Module limits received from manager");
 
+                                /* DEBUG: Log received limit values (temporary - remove later) */
+                                mdebug1("DEBUG - Received FIM limits: file=%d, registry=%d",
+                                        agent_module_limits.fim.file, agent_module_limits.fim.registry);
+                                mdebug1("DEBUG - Received Syscollector limits: hotfixes=%d, packages=%d, processes=%d, ports=%d",
+                                        agent_module_limits.syscollector.hotfixes,
+                                        agent_module_limits.syscollector.packages,
+                                        agent_module_limits.syscollector.processes,
+                                        agent_module_limits.syscollector.ports);
+                                mdebug1("DEBUG - Received Syscollector limits: net_iface=%d, net_proto=%d, net_addr=%d",
+                                        agent_module_limits.syscollector.network_iface,
+                                        agent_module_limits.syscollector.network_protocol,
+                                        agent_module_limits.syscollector.network_address);
+                                mdebug1("DEBUG - Received Syscollector limits: hw=%d, os=%d, users=%d, groups=%d, services=%d",
+                                        agent_module_limits.syscollector.hardware,
+                                        agent_module_limits.syscollector.os_info,
+                                        agent_module_limits.syscollector.users,
+                                        agent_module_limits.syscollector.groups,
+                                        agent_module_limits.syscollector.services);
+                                mdebug1("DEBUG - Received SCA limits: checks=%d", agent_module_limits.sca.checks);
+
                                 if (agent_cluster_name[0] != '\0') {
                                     minfo("Connected to cluster: %s", agent_cluster_name);
                                 } else {
