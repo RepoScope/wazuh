@@ -29,10 +29,16 @@
 #include "../wazuh_db/wdb.h"
 #include "../remoted/remoted.h"
 #include "../remoted/shared_download.h"
+#include "../headers/module_limits.h"
 #include "../../remoted/manager.c"
 
 int lookfor_agent_group(const char *agent_id, char *msg, char **r_group, int* wdb_sock);
 extern OSHash *agent_data_hash;
+
+/* Wrapper for get_cluster_name */
+char* __wrap_get_cluster_name(void) {
+    return mock_ptr_type(char *);
+}
 
 /* tests */
 
@@ -5427,6 +5433,177 @@ void test_save_controlmsg_shutdown_wdb_fail(void **state)
     os_free(message);
 }
 
+/* build_handshake_json tests */
+
+static void test_build_handshake_json_default_values(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char *json_str = NULL;
+    cJSON *root = NULL;
+    cJSON *limits_obj = NULL;
+    cJSON *fim = NULL;
+    cJSON *syscollector = NULL;
+    cJSON *sca = NULL;
+    cJSON *cluster = NULL;
+
+    module_limits_init(&limits);
+
+    /* Mock get_cluster_name to return NULL (will use default) */
+    will_return(__wrap_get_cluster_name, NULL);
+
+    json_str = build_handshake_json(&limits);
+
+    assert_non_null(json_str);
+
+    /* Parse and verify structure */
+    root = cJSON_Parse(json_str);
+    assert_non_null(root);
+
+    limits_obj = cJSON_GetObjectItem(root, "limits");
+    assert_non_null(limits_obj);
+
+    /* Verify FIM limits */
+    fim = cJSON_GetObjectItem(limits_obj, "fim");
+    assert_non_null(fim);
+    assert_int_equal(cJSON_GetObjectItem(fim, "file")->valueint, DEFAULT_FIM_FILE_LIMIT);
+    assert_int_equal(cJSON_GetObjectItem(fim, "registry")->valueint, DEFAULT_FIM_REGISTRY_LIMIT);
+
+    /* Verify Syscollector limits */
+    syscollector = cJSON_GetObjectItem(limits_obj, "syscollector");
+    assert_non_null(syscollector);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "hotfixes")->valueint, DEFAULT_SYSCOLLECTOR_HOTFIXES);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "packages")->valueint, DEFAULT_SYSCOLLECTOR_PACKAGES);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "processes")->valueint, DEFAULT_SYSCOLLECTOR_PROCESSES);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "ports")->valueint, DEFAULT_SYSCOLLECTOR_PORTS);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "network_iface")->valueint, DEFAULT_SYSCOLLECTOR_NETWORK_IFACE);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "network_protocol")->valueint, DEFAULT_SYSCOLLECTOR_NETWORK_PROTO);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "network_address")->valueint, DEFAULT_SYSCOLLECTOR_NETWORK_ADDR);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "hardware")->valueint, DEFAULT_SYSCOLLECTOR_HARDWARE);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "os_info")->valueint, DEFAULT_SYSCOLLECTOR_OS_INFO);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "users")->valueint, DEFAULT_SYSCOLLECTOR_USERS);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "groups")->valueint, DEFAULT_SYSCOLLECTOR_GROUPS);
+    assert_int_equal(cJSON_GetObjectItem(syscollector, "services")->valueint, DEFAULT_SYSCOLLECTOR_SERVICES);
+
+    /* Verify SCA limits */
+    sca = cJSON_GetObjectItem(limits_obj, "sca");
+    assert_non_null(sca);
+    assert_int_equal(cJSON_GetObjectItem(sca, "checks")->valueint, DEFAULT_SCA_CHECKS);
+
+    /* Verify cluster_name uses default when get_cluster_name returns NULL */
+    cluster = cJSON_GetObjectItem(root, "cluster_name");
+    assert_non_null(cluster);
+    assert_string_equal(cluster->valuestring, DEFAULT_CLUSTER_NAME);
+
+    cJSON_Delete(root);
+    os_free(json_str);
+}
+
+static void test_build_handshake_json_custom_values(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char *json_str = NULL;
+    cJSON *root = NULL;
+    cJSON *limits_obj = NULL;
+    cJSON *fim = NULL;
+    cJSON *sca = NULL;
+
+    module_limits_init(&limits);
+
+    /* Set custom values */
+    limits.fim.file = 200000;
+    limits.fim.registry = 150000;
+    limits.sca.checks = 20000;
+
+    /* Mock get_cluster_name to return a custom name */
+    will_return(__wrap_get_cluster_name, strdup("custom-cluster"));
+
+    json_str = build_handshake_json(&limits);
+
+    assert_non_null(json_str);
+
+    /* Parse and verify structure */
+    root = cJSON_Parse(json_str);
+    assert_non_null(root);
+
+    limits_obj = cJSON_GetObjectItem(root, "limits");
+    assert_non_null(limits_obj);
+
+    /* Verify custom FIM limits */
+    fim = cJSON_GetObjectItem(limits_obj, "fim");
+    assert_non_null(fim);
+    assert_int_equal(cJSON_GetObjectItem(fim, "file")->valueint, 200000);
+    assert_int_equal(cJSON_GetObjectItem(fim, "registry")->valueint, 150000);
+
+    /* Verify custom SCA limits */
+    sca = cJSON_GetObjectItem(limits_obj, "sca");
+    assert_non_null(sca);
+    assert_int_equal(cJSON_GetObjectItem(sca, "checks")->valueint, 20000);
+
+    /* Verify custom cluster_name */
+    cJSON *cluster = cJSON_GetObjectItem(root, "cluster_name");
+    assert_non_null(cluster);
+    assert_string_equal(cluster->valuestring, "custom-cluster");
+
+    cJSON_Delete(root);
+    os_free(json_str);
+}
+
+static void test_build_handshake_json_null_limits(void **state) {
+    (void)state;
+    char *json_str = NULL;
+
+    json_str = build_handshake_json(NULL);
+
+    assert_null(json_str);
+}
+
+static void test_build_handshake_json_verifies_structure(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char *json_str = NULL;
+    cJSON *root = NULL;
+    cJSON *limits_obj = NULL;
+
+    module_limits_init(&limits);
+
+    /* Mock get_cluster_name to return a cluster name */
+    will_return(__wrap_get_cluster_name, strdup("wazuh-cluster"));
+
+    json_str = build_handshake_json(&limits);
+
+    assert_non_null(json_str);
+
+    /* Parse and verify complete structure */
+    root = cJSON_Parse(json_str);
+    assert_non_null(root);
+
+    /* Check top-level structure */
+    limits_obj = cJSON_GetObjectItem(root, "limits");
+    assert_non_null(limits_obj);
+    assert_true(cJSON_IsObject(limits_obj));
+
+    cJSON *cluster_name = cJSON_GetObjectItem(root, "cluster_name");
+    assert_non_null(cluster_name);
+    assert_true(cJSON_IsString(cluster_name));
+    assert_string_equal(cluster_name->valuestring, "wazuh-cluster");
+
+    /* Check limits sub-objects exist and are objects */
+    cJSON *fim = cJSON_GetObjectItem(limits_obj, "fim");
+    assert_non_null(fim);
+    assert_true(cJSON_IsObject(fim));
+
+    cJSON *syscollector = cJSON_GetObjectItem(limits_obj, "syscollector");
+    assert_non_null(syscollector);
+    assert_true(cJSON_IsObject(syscollector));
+
+    cJSON *sca = cJSON_GetObjectItem(limits_obj, "sca");
+    assert_non_null(sca);
+    assert_true(cJSON_IsObject(sca));
+
+    cJSON_Delete(root);
+    os_free(json_str);
+}
+
 
 int main(void)
 {
@@ -5568,6 +5745,11 @@ int main(void)
         cmocka_unit_test_setup_teardown(test_save_controlmsg_startup, setup_globals, teardown_globals),
         cmocka_unit_test_setup_teardown(test_save_controlmsg_shutdown, setup_globals, teardown_globals),
         cmocka_unit_test_setup_teardown(test_save_controlmsg_shutdown_wdb_fail, setup_globals, teardown_globals),
+        // Tests build_handshake_json
+        cmocka_unit_test(test_build_handshake_json_default_values),
+        cmocka_unit_test(test_build_handshake_json_custom_values),
+        cmocka_unit_test(test_build_handshake_json_null_limits),
+        cmocka_unit_test(test_build_handshake_json_verifies_structure),
     };
     return cmocka_run_group_tests(tests, test_setup_group, test_teardown_group);
 }

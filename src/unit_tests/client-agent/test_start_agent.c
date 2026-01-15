@@ -26,11 +26,14 @@
 #endif
 
 #include "../client-agent/agentd.h"
+#include "../headers/module_limits.h"
 
 extern void send_msg_on_startup(void);
 extern bool agent_handshake_to_server(int server_id, bool is_startup);
 extern void send_agent_stopped_message();
 extern int _s_verify_counter;
+extern int parse_handshake_json(const char *json_str, module_limits_t *limits,
+                                char *cluster_name, size_t cluster_name_size);
 
 int __wrap_send_msg(const char *msg, ssize_t msg_length) {
     check_expected(msg);
@@ -458,6 +461,179 @@ static void test_send_msg_on_startup(void **state) {
     return;
 }
 
+/* parse_handshake_json tests */
+static void test_parse_handshake_json_full_payload(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char cluster_name[256] = {0};
+    int ret;
+
+    const char *json_str =
+        "{"
+        "\"limits\":{"
+            "\"fim\":{\"file\":200000,\"registry\":150000},"
+            "\"syscollector\":{"
+                "\"hotfixes\":2000,\"packages\":60000,\"processes\":70000,"
+                "\"ports\":80000,\"network_iface\":200,\"network_protocol\":300,"
+                "\"network_address\":400,\"hardware\":2,\"os_info\":3,"
+                "\"users\":100,\"groups\":200,\"services\":20000"
+            "},"
+            "\"sca\":{\"checks\":15000}"
+        "},"
+        "\"cluster_name\":\"test-cluster\""
+        "}";
+
+    module_limits_init(&limits);
+    ret = parse_handshake_json(json_str, &limits, cluster_name, sizeof(cluster_name));
+
+    assert_int_equal(ret, 0);
+    assert_int_equal(limits.fim.file, 200000);
+    assert_int_equal(limits.fim.registry, 150000);
+    assert_int_equal(limits.syscollector.hotfixes, 2000);
+    assert_int_equal(limits.syscollector.packages, 60000);
+    assert_int_equal(limits.syscollector.processes, 70000);
+    assert_int_equal(limits.syscollector.ports, 80000);
+    assert_int_equal(limits.syscollector.network_iface, 200);
+    assert_int_equal(limits.syscollector.network_protocol, 300);
+    assert_int_equal(limits.syscollector.network_address, 400);
+    assert_int_equal(limits.syscollector.hardware, 2);
+    assert_int_equal(limits.syscollector.os_info, 3);
+    assert_int_equal(limits.syscollector.users, 100);
+    assert_int_equal(limits.syscollector.groups, 200);
+    assert_int_equal(limits.syscollector.services, 20000);
+    assert_int_equal(limits.sca.checks, 15000);
+    assert_true(limits.limits_received);
+    assert_string_equal(cluster_name, "test-cluster");
+}
+
+static void test_parse_handshake_json_partial_limits(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char cluster_name[256] = {0};
+    int ret;
+
+    /* Only FIM limits provided */
+    const char *json_str =
+        "{"
+        "\"limits\":{"
+            "\"fim\":{\"file\":50000,\"registry\":25000}"
+        "}"
+        "}";
+
+    module_limits_init(&limits);
+    ret = parse_handshake_json(json_str, &limits, cluster_name, sizeof(cluster_name));
+
+    assert_int_equal(ret, 0);
+    /* FIM should be updated */
+    assert_int_equal(limits.fim.file, 50000);
+    assert_int_equal(limits.fim.registry, 25000);
+    /* Syscollector and SCA should remain at defaults */
+    assert_int_equal(limits.syscollector.hotfixes, DEFAULT_SYSCOLLECTOR_HOTFIXES);
+    assert_int_equal(limits.sca.checks, DEFAULT_SCA_CHECKS);
+    assert_true(limits.limits_received);
+}
+
+static void test_parse_handshake_json_with_cluster_name(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char cluster_name[256] = {0};
+    int ret;
+
+    const char *json_str =
+        "{"
+        "\"limits\":{\"fim\":{\"file\":100000}},"
+        "\"cluster_name\":\"wazuh-cluster\""
+        "}";
+
+    module_limits_init(&limits);
+    ret = parse_handshake_json(json_str, &limits, cluster_name, sizeof(cluster_name));
+
+    assert_int_equal(ret, 0);
+    assert_string_equal(cluster_name, "wazuh-cluster");
+}
+
+static void test_parse_handshake_json_no_cluster_name(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char cluster_name[256] = {0};
+    int ret;
+
+    const char *json_str =
+        "{"
+        "\"limits\":{\"fim\":{\"file\":100000}}"
+        "}";
+
+    module_limits_init(&limits);
+    cluster_name[0] = '\0';
+    ret = parse_handshake_json(json_str, &limits, cluster_name, sizeof(cluster_name));
+
+    assert_int_equal(ret, 0);
+    /* cluster_name should remain empty */
+    assert_string_equal(cluster_name, "");
+}
+
+static void test_parse_handshake_json_invalid_json(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char cluster_name[256] = {0};
+    int ret;
+
+    const char *json_str = "not valid json {{{";
+
+    module_limits_init(&limits);
+    expect_any(__wrap__merror, formatted_msg);
+    ret = parse_handshake_json(json_str, &limits, cluster_name, sizeof(cluster_name));
+
+    assert_int_equal(ret, -1);
+}
+
+static void test_parse_handshake_json_no_limits_object(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char cluster_name[256] = {0};
+    int ret;
+
+    const char *json_str = "{\"cluster_name\":\"test\"}";
+
+    module_limits_init(&limits);
+    expect_any(__wrap__mdebug1, formatted_msg);
+    ret = parse_handshake_json(json_str, &limits, cluster_name, sizeof(cluster_name));
+
+    assert_int_equal(ret, -1);
+}
+
+static void test_parse_handshake_json_null_params(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char cluster_name[256] = {0};
+    int ret;
+
+    const char *json_str = "{\"limits\":{\"fim\":{\"file\":100000}}}";
+
+    /* Test with NULL json_str */
+    ret = parse_handshake_json(NULL, &limits, cluster_name, sizeof(cluster_name));
+    assert_int_equal(ret, -1);
+
+    /* Test with NULL limits */
+    ret = parse_handshake_json(json_str, NULL, cluster_name, sizeof(cluster_name));
+    assert_int_equal(ret, -1);
+}
+
+static void test_parse_handshake_json_empty_string(void **state) {
+    (void)state;
+    module_limits_t limits;
+    char cluster_name[256] = {0};
+    int ret;
+
+    const char *json_str = "";
+
+    module_limits_init(&limits);
+    expect_any(__wrap__merror, formatted_msg);
+    ret = parse_handshake_json(json_str, &limits, cluster_name, sizeof(cluster_name));
+
+    assert_int_equal(ret, -1);
+}
+
 /* send_agent_stopped_message */
 static void test_send_agent_stopped_message(void **state) {
 
@@ -476,6 +652,15 @@ int main(void) {
         cmocka_unit_test_setup_teardown(test_agent_handshake_to_server_error_getting_msg2, setup_test, teardown_test),
         cmocka_unit_test_setup_teardown(test_send_msg_on_startup, setup_test, teardown_test),
         cmocka_unit_test_setup_teardown(test_send_agent_stopped_message, setup_test, teardown_test),
+        /* parse_handshake_json tests */
+        cmocka_unit_test(test_parse_handshake_json_full_payload),
+        cmocka_unit_test(test_parse_handshake_json_partial_limits),
+        cmocka_unit_test(test_parse_handshake_json_with_cluster_name),
+        cmocka_unit_test(test_parse_handshake_json_no_cluster_name),
+        cmocka_unit_test(test_parse_handshake_json_invalid_json),
+        cmocka_unit_test(test_parse_handshake_json_no_limits_object),
+        cmocka_unit_test(test_parse_handshake_json_null_params),
+        cmocka_unit_test(test_parse_handshake_json_empty_string),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
