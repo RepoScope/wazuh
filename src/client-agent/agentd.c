@@ -18,9 +18,6 @@ bool needs_config_reload = false;
 /* Agent's module limits instance */
 module_limits_t agent_module_limits;
 
-/* Cluster name received from manager */
-char agent_cluster_name[256] = {0};
-
 void reload_handler(int signum) {
     if (signum == SIGUSR1) {
         minfo("SIGNAL [(%d)-(%s)] Received. Reload agentd.", signum, strsignal(signum));

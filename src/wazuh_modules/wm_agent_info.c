@@ -64,6 +64,7 @@ agent_info_set_log_function_func agent_info_set_log_function_ptr = NULL;
 agent_info_set_report_function_func agent_info_set_report_function_ptr = NULL;
 agent_info_init_sync_protocol_func agent_info_init_sync_protocol_ptr = NULL;
 agent_info_set_query_module_function_func agent_info_set_query_module_function_ptr = NULL;
+agent_info_set_cluster_name_func agent_info_set_cluster_name_ptr = NULL;
 
 // Sync protocol function pointers
 static agent_info_parse_response_func agent_info_parse_response_ptr = NULL;
@@ -417,10 +418,44 @@ void wm_agent_info_stop()
 // Sync message function
 int wm_agent_info_sync_message(const char* command, size_t command_len)
 {
+    size_t header_len = strlen(AGENT_INFO_SYNC_HEADER);
+
+    // Safety check for command length
+    if (command_len <= header_len)
+    {
+        mdebug1("Agent-info sync message too short");
+        return -1;
+    }
+
+    const char* json_data = command + header_len;
+
+    // Try to parse as JSON to check for special message types (like set_cluster_name)
+    cJSON* root = cJSON_Parse(json_data);
+    if (root)
+    {
+        cJSON* type = cJSON_GetObjectItem(root, "type");
+        if (type && cJSON_IsString(type))
+        {
+            // Handle set_cluster_name message from agentd handshake
+            if (strcmp(type->valuestring, "set_cluster_name") == 0)
+            {
+                cJSON* cluster = cJSON_GetObjectItem(root, "cluster_name");
+                if (cluster && cJSON_IsString(cluster) && agent_info_set_cluster_name_ptr)
+                {
+                    agent_info_set_cluster_name_ptr(cluster->valuestring);
+                    minfo("Cluster name received from handshake: %s", cluster->valuestring);
+                }
+                cJSON_Delete(root);
+                return 0;
+            }
+        }
+        cJSON_Delete(root);
+    }
+
+    // Not a special message type, handle as sync protocol response
     if (agent_info_enable_synchronization && agent_info_parse_response_ptr)
     {
-        size_t header_len = strlen(AGENT_INFO_SYNC_HEADER);
-        const uint8_t* data = (const uint8_t*)(command + header_len);
+        const uint8_t* data = (const uint8_t*)json_data;
         size_t data_len = command_len - header_len;
 
         bool ret = agent_info_parse_response_ptr(data, data_len);
@@ -483,6 +518,7 @@ void* wm_agent_info_main(wm_agent_info_t* agent_info)
         agent_info_set_report_function_ptr = so_get_function_sym(agent_info_module, "agent_info_set_report_function");
         agent_info_init_sync_protocol_ptr = so_get_function_sym(agent_info_module, "agent_info_init_sync_protocol");
         agent_info_set_query_module_function_ptr = so_get_function_sym(agent_info_module, "agent_info_set_query_module_function");
+        agent_info_set_cluster_name_ptr = so_get_function_sym(agent_info_module, "agent_info_set_cluster_name");
 
         // Get sync protocol function pointers
         agent_info_parse_response_ptr = so_get_function_sym(agent_info_module, "agent_info_parse_response");

@@ -12,10 +12,10 @@
 #include "agentd.h"
 #include "os_net/os_net.h"
 #include "module_limits.h"
+#include "wazuh_modules/wmodules.h"
 
 /* Defined in agentd.c */
 extern module_limits_t agent_module_limits;
-extern char agent_cluster_name[256];
 
 #ifdef WAZUH_UNIT_TESTING
     // Remove static qualifier when unit testing
@@ -450,8 +450,9 @@ STATIC bool agent_handshake_to_server(int server_id, bool is_startup) {
                         /* Check for JSON payload after HC_ACK */
                         const char *json_start = strchr(tmp_msg, '{');
                         if (json_start) {
+                            char cluster_name_buffer[256] = {0};
                             if (parse_handshake_json(json_start, &agent_module_limits,
-                                                      agent_cluster_name, sizeof(agent_cluster_name)) == 0) {
+                                                      cluster_name_buffer, sizeof(cluster_name_buffer)) == 0) {
                                 minfo("Module limits received from manager");
 
                                 /* DEBUG: Log received limit values (temporary - remove later) */
@@ -474,8 +475,14 @@ STATIC bool agent_handshake_to_server(int server_id, bool is_startup) {
                                         agent_module_limits.syscollector.services);
                                 mdebug1("DEBUG - Received SCA limits: checks=%d", agent_module_limits.sca.checks);
 
-                                if (agent_cluster_name[0] != '\0') {
-                                    minfo("Connected to cluster: %s", agent_cluster_name);
+                                if (cluster_name_buffer[0] != '\0') {
+                                    /* Send cluster_name to agent-info module via wmcom */
+                                    char cluster_msg[512];
+                                    snprintf(cluster_msg, sizeof(cluster_msg),
+                                             "%s{\"type\":\"set_cluster_name\",\"cluster_name\":\"%s\"}",
+                                             AGENT_INFO_SYNC_HEADER, cluster_name_buffer);
+                                    wmcom_send(cluster_msg, strlen(cluster_msg));
+                                    minfo("Connected to cluster: %s", cluster_name_buffer);
                                 } else {
                                     mwarn("No cluster name received from manager");
                                 }
